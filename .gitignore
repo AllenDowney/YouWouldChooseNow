@@ -226,3 +226,6 @@ notebooks/tables/
 notebooks/outputs/
 # NetCDF (ArviZ / PyMC idata on disk); large and regenerable
 *.nc
+
+# Jupyter Book local build
+jb/_build/

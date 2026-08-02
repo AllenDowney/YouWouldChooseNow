@@ -10,3 +10,5 @@ conda activate YouWouldChooseNow
 ```
 
 Notebooks live in `notebooks/` (Jupytext Markdown is canonical; `make ipynb` builds `.ipynb`).
+
+Site source is in `jb/` (`cd jb && make build-local && make serve`).

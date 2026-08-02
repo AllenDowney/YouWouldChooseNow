@@ -37,3 +37,7 @@ dependencies:
   - flake8
   - pytest
   - nbmake
+
+  # Jupyter Book site (jb/)
+  - jupyter-book
+  - ghp-import

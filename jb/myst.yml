@@ -1,0 +1,15 @@
+# See docs at: https://mystmd.org/guide/frontmatter
+version: 1
+
+project:
+  id: you-would-choose-now
+  title: You Would Choose Now
+  github: https://github.com/AllenDowney/YouWouldChooseNow
+  toc:
+    - file: index.md
+
+site:
+  template: book-theme
+  title: You Would Choose Now
+  options:
+    logo_text: You Would Choose Now
