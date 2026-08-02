@@ -22,6 +22,15 @@ We start from yearly weighted proportions, then fit a sequence of Bayesian model
 
 
 ```python
+# Colab ships an older PyMC; installing nutpie alone can pull ArviZ 1.x and break imports.
+# Upgrade the sampling stack together (matches this project's env: pymc>=6, arviz>=1.1, nutpie).
+import sys
+
+if "google.colab" in sys.modules:
+    %pip install -q "pymc>=6" "arviz>=1.1" nutpie
+```
+
+```python
 import os
 from pathlib import Path
 

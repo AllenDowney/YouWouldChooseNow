@@ -21,6 +21,15 @@ This notebook walks through the period–cohort models from the talk, using the 
 We start from weighted cohort × survey-year cells, look at the raw trajectories, then fit an additive period–cohort model with second-order random walks on cohort and period plus year-level overdispersion (no separate age effect: age is implied by survey year and birth cohort). Finally we fit a separate period-only model within each birth decade, so you can compare the shared period–cohort surface to decade-specific trends. Model definitions and plotting helpers are written out below.
 
 ```python
+# Colab ships an older PyMC; installing nutpie alone can pull ArviZ 1.x and break imports.
+# Upgrade the sampling stack together (matches this project's env: pymc>=6, arviz>=1.1, nutpie).
+import sys
+
+if "google.colab" in sys.modules:
+    %pip install -q "pymc>=6" "arviz>=1.1" nutpie
+```
+
+```python
 import os
 from pathlib import Path
 
