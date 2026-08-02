@@ -216,3 +216,13 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# --- YouWouldChooseNow: notebook pipeline outputs (Jupytext *.md is canonical) ---
+notebooks/*.ipynb
+notebooks/idata/
+notebooks/logs/
+notebooks/figs/
+notebooks/tables/
+notebooks/outputs/
+# NetCDF (ArviZ / PyMC idata on disk); large and regenerable
+*.nc

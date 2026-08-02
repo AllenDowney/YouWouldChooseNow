@@ -1,0 +1,39 @@
+name: YouWouldChooseNow
+channels:
+  - conda-forge
+
+dependencies:
+  # Python (PyMC 6 requires >=3.12)
+  - python=3.12
+
+  # Jupyter
+  - jupyter
+  - jupytext
+  - nbclassic
+  - nbconvert
+
+  # Data manipulation
+  - numpy
+  - pandas
+  - tabulate
+  - scipy
+  - pytables          # HDF5 support (tables package)
+  - xarray
+  - h5netcdf
+
+  # Visualization
+  - matplotlib
+  - seaborn
+
+  # Bayesian (Python)
+  - pymc>=6
+  - nutpie
+  - arviz>=1.1
+  - numba
+
+  # Development tools
+  - pip
+  - black
+  - flake8
+  - pytest
+  - nbmake
