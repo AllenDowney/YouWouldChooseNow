@@ -169,41 +169,37 @@ def xlim_cohort(cohorts):
     return (float(s.min()) - GSS_FIG_COHORT_PAD, float(s.max()) + GSS_FIG_COHORT_PAD)
 
 
-def rw2(name, K, sigma, *, dims=None):
+def rw2(name, n, sigma, *, dims=None):
     """Mean-centered RW2 with a free initial slope.
 
     The initial level is fixed at zero because any constant offset is
-    removed when the completed path is mean-centered.
+    removed when the completed path is mean-centered. Second differences
+    use a non-centered parameterization with scale ``sigma``. The initial
+    slope is ``Normal(0, 0.2)``.
 
-    Second differences use a non-centered parameterization with scale
-    ``sigma``. The initial slope has prior standard deviation 0.2.
+    Parameters
+    ----------
+    name : str
+        Prefix for latent variables (e.g. ``"cohort"`` or ``"period"``).
+    n : int
+        Length of the latent path.
+    sigma : tensor or float
+        Scale of the second-difference innovations (usually an ``Exponential`` RV).
+    dims : str or sequence of str, optional
+        Coordinate dims passed to ``pm.Deterministic``.
     """
-    z_delta = pm.Normal(
-        f"{name}_z_delta2",
-        mu=0.0,
-        sigma=1.0,
-        shape=K - 2,
-    )
+    z_delta = pm.Normal(f"{name}_z_delta", mu=0.0, sigma=1.0, shape=n - 2)
     delta = sigma * z_delta
-
-    z1 = pm.Normal(
-        f"{name}_z1",
-        mu=0.0,
-        sigma=1.0,
+    v0 = pm.Normal(f"{name}_slope_init", mu=0.0, sigma=0.2)
+    # First differences (length n-1)
+    rw1 = v0 + pm.math.concatenate(
+        [pm.math.zeros(1), pm.math.cumsum(delta)]
     )
-    v0 = 0.2 * z1
-
-    # Successive slopes after the initial slope.
-    rw1 = v0 + pm.math.cumsum(delta)
-
-    # Fix the arbitrary initial level at zero.
-    raw = pm.math.concatenate([
-        pm.math.stack([0.0, v0]),
-        v0 + pm.math.cumsum(rw1),
-    ])
-
-    centered = raw - pm.math.mean(raw)
-    return pm.Deterministic(name, centered, dims=dims)
+    # Cumulative sum of rw1 (length n), then mean-center
+    raw = pm.math.concatenate(
+        [pm.math.zeros(1), pm.math.cumsum(rw1)]
+    )
+    return pm.Deterministic(name, raw - pm.math.mean(raw), dims=dims)
 
 
 def build_period_cohort_model(cells, cohorts, years_grid):

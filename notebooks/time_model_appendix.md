@@ -93,7 +93,7 @@ OBS_COLOR = "0.45"
 
 ## Notebook helpers
 
-Small plotting and sampling utilities, plus the period RW2 used in later steps: non-centered second differences, free initial slope with level fixed at 0, then a mean-centered path.
+Small plotting and sampling utilities, plus a shared RW2 helper: non-centered second differences, free initial slope with level fixed at 0, then a mean-centered path.
 
 ```python
 def add_title(title, *, pad=FIG_TITLE_PAD):
@@ -149,33 +149,37 @@ def load_idata_or_sample(model, filename, *, force_run=False, **sample_options):
     return idata
 
 
-def rw2_period(K, sigma, *, dims=None):
-    """Period RW2: non-centered Δ², free init slope, fixed init level 0, mean-centered path.
+def rw2(name, n, sigma, *, dims=None):
+    """Mean-centered RW2 with a free initial slope.
 
-    The raw path starts at level 0 with free initial slope; mean-centering then
-    removes any constant offset (``alpha`` carries the overall level). A free
-    initial level would cancel under centering and is omitted.
+    The initial level is fixed at zero because any constant offset is
+    removed when the completed path is mean-centered. Second differences
+    use a non-centered parameterization with scale ``sigma``. The initial
+    slope is ``Normal(0, 0.2)``.
 
     Parameters
     ----------
-    K : int
-        Length of the period grid (number of years on the latent path).
+    name : str
+        Prefix for latent variables (e.g. ``"cohort"`` or ``"period"``).
+    n : int
+        Length of the latent path.
     sigma : tensor or float
         Scale of the second-difference innovations (usually an ``Exponential`` RV).
     dims : str or sequence of str, optional
-        Coordinate dims passed to ``pm.Deterministic`` (e.g. ``"year_idx"``).
+        Coordinate dims passed to ``pm.Deterministic``.
     """
-    name = "period"
-    z_delta2 = pm.Normal(f"{name}_z_delta2", mu=0.0, sigma=1.0, shape=K - 2)
-    delta2 = sigma * z_delta2
-    slope0 = pm.Normal(f"{name}_slope_init", mu=0.0, sigma=0.2)
-    f_init = pm.math.stack([0.0, slope0])
-    f_raw = pm.math.concatenate(
-        [f_init, f_init[1] + pm.math.cumsum(f_init[1] - f_init[0] + pm.math.cumsum(delta2))]
+    z_delta = pm.Normal(f"{name}_z_delta", mu=0.0, sigma=1.0, shape=n - 2)
+    delta = sigma * z_delta
+    v0 = pm.Normal(f"{name}_slope_init", mu=0.0, sigma=0.2)
+    # First differences (length n-1)
+    rw1 = v0 + pm.math.concatenate(
+        [pm.math.zeros(1), pm.math.cumsum(delta)]
     )
-    f = f_raw - pm.math.mean(f_raw)
-    return pm.Deterministic(name, f, dims=dims)
-
+    # Cumulative sum of rw1 (length n), then mean-center
+    raw = pm.math.concatenate(
+        [pm.math.zeros(1), pm.math.cumsum(rw1)]
+    )
+    return pm.Deterministic(name, raw - pm.math.mean(raw), dims=dims)
 
 os.makedirs("figs", exist_ok=True)
 os.makedirs("idata", exist_ok=True)
@@ -544,7 +548,7 @@ The RW2 helper defined earlier builds this component.
 with pm.Model(coords=coords) as model_rw2:
     alpha = pm.Normal("alpha", mu=0.0, sigma=1.0)
     sigma_t = pm.Exponential("sigma_t", lam=1.0 / SIGMA_T_SCALE)
-    period = rw2_period(n_years, sigma_t, dims="year_idx")
+    period = rw2("period", n_years, sigma_t, dims="year_idx")
     eta = pm.Deterministic("eta", alpha + period, dims="year_idx")
     support = pm.Deterministic("support", pm.math.sigmoid(eta), dims="year_idx")
 
@@ -601,7 +605,7 @@ $$
 with pm.Model(coords=coords) as model_tm:
     alpha = pm.Normal("alpha", mu=0.0, sigma=1.0)
     sigma_t = pm.Exponential("sigma_t", lam=1.0 / SIGMA_T_SCALE)
-    period = rw2_period(n_years, sigma_t, dims="year_idx")
+    period = rw2("period", n_years, sigma_t, dims="year_idx")
     eta = pm.Deterministic("eta", alpha + period, dims="year_idx")
     support = pm.Deterministic("support", pm.math.sigmoid(eta), dims="year_idx")
 
@@ -651,7 +655,7 @@ plot_support_fit(idata_tm, subtitle="RW2 model + overdispersion", fig_stem="time
 
 ### Simplified model
 
-Same model as Step 5, written with the talk’s names: $\delta$ second differences (`delta`), $v_0$ initial slope (`v0`), `rw1` / `rw2` the integrated first-difference and level paths, and $\varepsilon$ year-level logit noise (`eps`). The initial level is fixed at 0: after mean-centering, a free $x_0$ would cancel exactly ($\mathrm{rw2}_{\mathrm{raw}}=x_0+g$ implies $\mathrm{rw2}=g-\bar g$), so $\alpha$ carries the overall level while $v_0$ remains (it controls the linear component). Year shocks use the same non-centered zero-sum construction as Step 5 (`eps_z` / `eps`). Scales are `sigma` / `sigma_eps` (talk: $\sigma$).
+Same model as Step 5, written with the talk’s names: $\delta$ second differences (`delta`), $v_0$ initial slope (`v0`), `rw1` the first-difference path, `rw2` the integrated level path, and $\varepsilon$ year-level logit noise (`eps`). The initial level is fixed at 0: after mean-centering, a free $x_0$ would cancel exactly ($\mathrm{rw2}_{\mathrm{raw}}=x_0+g$ implies $\mathrm{rw2}=g-\bar g$), so $\alpha$ carries the overall level while $v_0$ remains (it controls the linear component). Year shocks use the same non-centered zero-sum construction as Step 5 (`eps_z` / `eps`). Scales are `sigma` / `sigma_eps` (talk: $\sigma$).
 
 ```python
 with pm.Model(coords=coords) as period_model:
@@ -661,11 +665,12 @@ with pm.Model(coords=coords) as period_model:
     sigma_eps = pm.HalfNormal("sigma_eps", sigma=SIGMA_SHORT_SCALE)
     v0 = pm.Normal("v0", mu=0.0, sigma=0.2)
     delta = pm.Normal("delta", mu=0.0, sigma=sigma, shape=n - 2)
-    rw1 = v0 + pm.math.cumsum(delta)
-    rw2_raw = pm.math.concatenate([
-        pm.math.stack([0.0, v0]),
-        v0 + pm.math.cumsum(rw1),
-    ])
+    rw1 = v0 + pm.math.concatenate(
+        [pm.math.zeros(1), pm.math.cumsum(delta)]
+    )
+    rw2_raw = pm.math.concatenate(
+        [pm.math.zeros(1), pm.math.cumsum(rw1)]
+    )
     rw2 = rw2_raw - pm.math.mean(rw2_raw)
     eps_z = pm.ZeroSumNormal("eps_z", sigma=1.0, dims="year_idx")
     eps = pm.Deterministic("eps", sigma_eps * eps_z, dims="year_idx")
