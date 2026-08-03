@@ -170,23 +170,40 @@ def xlim_cohort(cohorts):
 
 
 def rw2(name, K, sigma, *, dims=None):
-    """Mean-centered RW2 with free initial level ($x_0$) and slope ($v_0$).
+    """Mean-centered RW2 with a free initial slope.
 
-    Second differences use a non-centered scale ``sigma``; initials are non-centered
-    with fixed scales 0.5 (level) and 0.2 (slope). Used for both cohort and period.
+    The initial level is fixed at zero because any constant offset is
+    removed when the completed path is mean-centered.
+
+    Second differences use a non-centered parameterization with scale
+    ``sigma``. The initial slope has prior standard deviation 0.2.
     """
-    z_delta = pm.Normal(f"{name}_z_delta2", mu=0.0, sigma=1.0, shape=K - 2)
+    z_delta = pm.Normal(
+        f"{name}_z_delta2",
+        mu=0.0,
+        sigma=1.0,
+        shape=K - 2,
+    )
     delta = sigma * z_delta
-    z0 = pm.Normal(f"{name}_z0", mu=0.0, sigma=1.0)
-    z1 = pm.Normal(f"{name}_z1", mu=0.0, sigma=1.0)
-    x0 = 0.5 * z0
+
+    z1 = pm.Normal(
+        f"{name}_z1",
+        mu=0.0,
+        sigma=1.0,
+    )
     v0 = 0.2 * z1
-    rw1 = pm.math.cumsum(delta) + v0
+
+    # Successive slopes after the initial slope.
+    rw1 = v0 + pm.math.cumsum(delta)
+
+    # Fix the arbitrary initial level at zero.
     raw = pm.math.concatenate([
-        pm.math.stack([x0, x0 + v0]),
-        pm.math.cumsum(rw1) + (x0 + v0),
+        pm.math.stack([0.0, v0]),
+        v0 + pm.math.cumsum(rw1),
     ])
-    return pm.Deterministic(name, raw - pm.math.mean(raw), dims=dims)
+
+    centered = raw - pm.math.mean(raw)
+    return pm.Deterministic(name, centered, dims=dims)
 
 
 def build_period_cohort_model(cells, cohorts, years_grid):

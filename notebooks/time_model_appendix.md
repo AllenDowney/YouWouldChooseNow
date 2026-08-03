@@ -150,7 +150,11 @@ def load_idata_or_sample(model, filename, *, force_run=False, **sample_options):
 
 
 def rw2_period(K, sigma, *, dims=None):
-    """Period RW2: non-centered Δ², free init level/slope, mean-centered path.
+    """Period RW2: non-centered Δ², free init slope, fixed init level 0, mean-centered path.
+
+    The raw path starts at level 0 with free initial slope; mean-centering then
+    removes any constant offset (``alpha`` carries the overall level). A free
+    initial level would cancel under centering and is omitted.
 
     Parameters
     ----------
@@ -164,10 +168,8 @@ def rw2_period(K, sigma, *, dims=None):
     name = "period"
     z_delta2 = pm.Normal(f"{name}_z_delta2", mu=0.0, sigma=1.0, shape=K - 2)
     delta2 = sigma * z_delta2
-    f0 = pm.Normal(f"{name}_f0_init", mu=0.0, sigma=0.5)
     slope0 = pm.Normal(f"{name}_slope_init", mu=0.0, sigma=0.2)
-    f1 = f0 + slope0
-    f_init = pm.math.stack([f0, f1])
+    f_init = pm.math.stack([0.0, slope0])
     f_raw = pm.math.concatenate(
         [f_init, f_init[1] + pm.math.cumsum(f_init[1] - f_init[0] + pm.math.cumsum(delta2))]
     )
@@ -472,22 +474,23 @@ plot_support_fit(idata, subtitle="Linear logit model", fig_stem="linear_logit")
 
 ## Step 3 — First-order random walk on the period effect
 
-Replace the linear trend with a first-order Gaussian random walk: a free initial level, yearly innovations scaled by $\sigma_t$, then mean-centering for identifiability with the intercept:
+Replace the linear trend with a first-order Gaussian random walk: yearly innovations scaled by $\sigma_t$, initial level fixed at 0, then mean-centering for identifiability with the intercept:
 
 $$
-\mathrm{period}_0 = f_0,\quad \mathrm{period}_t = f_0 + \sum_{s=1}^{t} \delta_s,\quad
+\mathrm{period}_0 = 0,\quad \mathrm{period}_t = \sum_{s=1}^{t} \delta_s,\quad
 \mathrm{period} \leftarrow \mathrm{period} - \bar{\mathrm{period}}
 $$
 
-The walk continues through the extrapolation years, still with no data likelihood there.
+A free initial level would cancel under mean-centering (the same redundancy as $x_0$ in the RW2 construction below), so it is omitted; $\alpha$ carries the overall level. The walk continues through the extrapolation years, still with no data likelihood there.
 
 ```python
 with pm.Model(coords=coords) as model_rw1:
     alpha = pm.Normal("alpha", mu=0.0, sigma=1.0)
     sigma_t = pm.Exponential("sigma_t", lam=1.0 / SIGMA_T_SCALE)
-    period_f0_init = pm.Normal("period_f0_init", mu=0.0, sigma=0.5)
     period_innov = pm.Normal("period_innov", mu=0.0, sigma=sigma_t, shape=n_years - 1)
-    period_raw = pm.math.concatenate([period_f0_init.reshape((1,)), period_f0_init + pm.math.cumsum(period_innov)])
+    period_raw = pm.math.concatenate(
+        [pm.math.zeros((1,)), pm.math.cumsum(period_innov)]
+    )
     period = pm.Deterministic("period", period_raw - pm.math.mean(period_raw), dims="year_idx")
     eta = pm.Deterministic("eta", alpha + period, dims="year_idx")
     support = pm.Deterministic("support", pm.math.sigmoid(eta), dims="year_idx")
@@ -520,7 +523,7 @@ idata_rw1 = load_idata_or_sample(
         mass_matrix_gamma=1e-5,
     ),
 )
-az.summary(idata_rw1, var_names=["alpha", "sigma_t", "period_f0_init"], round_to=4)
+az.summary(idata_rw1, var_names=["alpha", "sigma_t"], round_to=4)
 ```
 
 ```python
@@ -638,7 +641,7 @@ plot_support_fit(idata_tm, subtitle="RW2 model + overdispersion", fig_stem="time
 
 ### Simplified model
 
-Same model as Step 5, written with the talk’s names: $\delta$ second differences (`delta`), $v_0$ initial slope (`v0`), $x0$ initial level (`x0`), `rw1` / `rw2` the integrated first-difference and level paths, and $\varepsilon$ year-level logit noise (`eps`). The free initials are prepended so `rw2` has length $n$; the slide line $\mathrm{rw2}=\mathrm{cumsum}(\mathrm{rw1})+x_0$ is the continuation after $t=1$ (with offset $x_0+v_0$). Scales are `sigma` / `sigma_eps` (talk: $\sigma$). Centered $\delta$ and $\varepsilon$ are the same priors as Step 5’s non-centered forms.
+Same model as Step 5, written with the talk’s names: $\delta$ second differences (`delta`), $v_0$ initial slope (`v0`), `rw1` / `rw2` the integrated first-difference and level paths, and $\varepsilon$ year-level logit noise (`eps`). The initial level is fixed at 0: after mean-centering, a free $x_0$ would cancel exactly ($\mathrm{rw2}_{\mathrm{raw}}=x_0+g$ implies $\mathrm{rw2}=g-\bar g$), so $\alpha$ carries the overall level while $v_0$ remains (it controls the linear component). Scales are `sigma` / `sigma_eps` (talk: $\sigma$). Centered $\delta$ and $\varepsilon$ are the same priors as Step 5’s non-centered forms.
 
 ```python
 with pm.Model(coords=coords) as period_model:
@@ -647,14 +650,13 @@ with pm.Model(coords=coords) as period_model:
     sigma = pm.Exponential("sigma", lam=1.0 / SIGMA_T_SCALE)
     sigma_eps = pm.HalfNormal("sigma_eps", sigma=SIGMA_SHORT_SCALE)
     v0 = pm.Normal("v0", mu=0.0, sigma=0.2)
-    x0 = pm.Normal("x0", mu=0.0, sigma=0.5)
     delta = pm.Normal("delta", mu=0.0, sigma=sigma, shape=n - 2)
-    rw1 = pm.math.cumsum(delta) + v0
-    rw2 = pm.math.concatenate([
-        pm.math.stack([x0, x0 + v0]),
-        pm.math.cumsum(rw1) + (x0 + v0),
+    rw1 = v0 + pm.math.cumsum(delta)
+    rw2_raw = pm.math.concatenate([
+        pm.math.stack([0.0, v0]),
+        v0 + pm.math.cumsum(rw1),
     ])
-    rw2 = rw2 - pm.math.mean(rw2)
+    rw2 = rw2_raw - pm.math.mean(rw2_raw)
     eps = pm.Normal("eps", mu=0.0, sigma=sigma_eps, shape=n)
     p = pm.math.sigmoid(alpha + rw2 + eps)
     pm.Binomial("y", n=n_eff_binom, p=p[year_idx_obs], observed=y_eff)
