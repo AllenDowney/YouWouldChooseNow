@@ -93,7 +93,7 @@ OBS_COLOR = "0.45"
 
 ## Notebook helpers
 
-Small plotting and sampling utilities, plus the period RW2 used in later steps: non-centered second differences, free initial level and slope, then a mean-centered path.
+Small plotting and sampling utilities, plus the period RW2 used in later steps: non-centered second differences, free initial slope with level fixed at 0, then a mean-centered path.
 
 ```python
 def add_title(title, *, pad=FIG_TITLE_PAD):
@@ -585,10 +585,16 @@ plot_support_fit(idata_rw2, subtitle="RW2 model", fig_stem="rw2")
 
 ## Step 5 — RW2 with year-level overdispersion
 
-The full period-only specification keeps the same RW2 for the smooth trend and adds a year-level shock $\epsilon_t$ on the logit at observed years (non-centered parameterization). The plotted curve is $\mathrm{support}_t = \mathrm{sigmoid}(\eta_t)$, the latent RW2 trend; $\epsilon_t$ absorbs short-term variation in the likelihood:
+The full period-only model adds mean-zero year-level deviations $\epsilon_t$ on the logit scale. The deviations use a non-centered zero-sum normal prior, so they represent short-term departures from the smooth RW2 trajectory without contributing an additional overall intercept. The plotted curve is $\mathrm{support}_t = \mathrm{sigmoid}(\eta_t)$, the latent RW2 trend; $\epsilon_t$ enters only the likelihood:
 
 $$
 \eta_t = \alpha + \mathrm{period}_t,\quad p_t = \mathrm{sigmoid}(\eta_t + \epsilon_t)\ \text{(observed years)}
+$$
+
+$$
+z \sim \operatorname{ZeroSumNormal}(0,1),\quad
+\epsilon_t = \sigma_{\mathrm{short}} z_t,\quad
+\sum_t \epsilon_t = 0.
 $$
 
 ```python
@@ -600,7 +606,7 @@ with pm.Model(coords=coords) as model_tm:
     support = pm.Deterministic("support", pm.math.sigmoid(eta), dims="year_idx")
 
     sigma_short = pm.HalfNormal("sigma_short", sigma=SIGMA_SHORT_SCALE)
-    epsilon_z = pm.Normal("epsilon_z", mu=0.0, sigma=1.0, dims="year_idx")
+    epsilon_z = pm.ZeroSumNormal("epsilon_z", sigma=1.0, dims="year_idx")
     epsilon = pm.Deterministic("epsilon", sigma_short * epsilon_z, dims="year_idx")
 
     eta_obs = eta[year_idx_obs]
@@ -632,6 +638,10 @@ idata_tm = load_idata_or_sample(
     ),
 )
 az.summary(idata_tm, var_names=["alpha", "sigma_t", "sigma_short"], round_to=4)
+print(
+    "max |sum_t epsilon|:",
+    float(np.abs(idata_tm.posterior["epsilon"].sum("year_idx")).max()),
+)
 ```
 
 ```python
@@ -641,7 +651,7 @@ plot_support_fit(idata_tm, subtitle="RW2 model + overdispersion", fig_stem="time
 
 ### Simplified model
 
-Same model as Step 5, written with the talk’s names: $\delta$ second differences (`delta`), $v_0$ initial slope (`v0`), `rw1` / `rw2` the integrated first-difference and level paths, and $\varepsilon$ year-level logit noise (`eps`). The initial level is fixed at 0: after mean-centering, a free $x_0$ would cancel exactly ($\mathrm{rw2}_{\mathrm{raw}}=x_0+g$ implies $\mathrm{rw2}=g-\bar g$), so $\alpha$ carries the overall level while $v_0$ remains (it controls the linear component). Scales are `sigma` / `sigma_eps` (talk: $\sigma$). Centered $\delta$ and $\varepsilon$ are the same priors as Step 5’s non-centered forms.
+Same model as Step 5, written with the talk’s names: $\delta$ second differences (`delta`), $v_0$ initial slope (`v0`), `rw1` / `rw2` the integrated first-difference and level paths, and $\varepsilon$ year-level logit noise (`eps`). The initial level is fixed at 0: after mean-centering, a free $x_0$ would cancel exactly ($\mathrm{rw2}_{\mathrm{raw}}=x_0+g$ implies $\mathrm{rw2}=g-\bar g$), so $\alpha$ carries the overall level while $v_0$ remains (it controls the linear component). Year shocks use the same non-centered zero-sum construction as Step 5 (`eps_z` / `eps`). Scales are `sigma` / `sigma_eps` (talk: $\sigma$).
 
 ```python
 with pm.Model(coords=coords) as period_model:
@@ -657,7 +667,8 @@ with pm.Model(coords=coords) as period_model:
         v0 + pm.math.cumsum(rw1),
     ])
     rw2 = rw2_raw - pm.math.mean(rw2_raw)
-    eps = pm.Normal("eps", mu=0.0, sigma=sigma_eps, shape=n)
+    eps_z = pm.ZeroSumNormal("eps_z", sigma=1.0, dims="year_idx")
+    eps = pm.Deterministic("eps", sigma_eps * eps_z, dims="year_idx")
     p = pm.math.sigmoid(alpha + rw2 + eps)
     pm.Binomial("y", n=n_eff_binom, p=p[year_idx_obs], observed=y_eff)
 ```

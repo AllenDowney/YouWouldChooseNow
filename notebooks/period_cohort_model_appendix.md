@@ -227,7 +227,7 @@ def build_period_cohort_model(cells, cohorts, years_grid):
             dims="cell_idx",
         )
         sigma_short = pm.Exponential("sigma_short", lam=1.0 / SIGMA_SHORT_SCALE_PC)
-        epsilon_z = pm.Normal("epsilon_z", mu=0.0, sigma=1.0, dims="year_idx")
+        epsilon_z = pm.ZeroSumNormal("epsilon_z", sigma=1.0, dims="year_idx")
         epsilon = pm.Deterministic("epsilon", sigma_short * epsilon_z, dims="year_idx")
         p_obs = pm.math.sigmoid(eta + epsilon[cells["year_idx"].values])
         pm.Binomial(
@@ -255,7 +255,7 @@ def build_period_model(observed, years_grid):
         eta = pm.Deterministic("eta", alpha + period, dims="year_idx")
         support = pm.Deterministic("support", pm.math.sigmoid(eta), dims="year_idx")
         sigma_short = pm.HalfNormal("sigma_short", sigma=SIGMA_SHORT_SCALE_TM)
-        epsilon_z = pm.Normal("epsilon_z", mu=0.0, sigma=1.0, dims="year_idx")
+        epsilon_z = pm.ZeroSumNormal("epsilon_z", sigma=1.0, dims="year_idx")
         epsilon = pm.Deterministic("epsilon", sigma_short * epsilon_z, dims="year_idx")
         p_obs = pm.math.sigmoid(eta[year_idx_obs] + epsilon[year_idx_obs])
         pm.Binomial("y", n=n_eff, p=p_obs, observed=y_eff)
@@ -612,7 +612,15 @@ $$
 p_{c,t} = \mathrm{sigmoid}(\eta_{c,t} + \epsilon_t)
 $$
 
-with second-order random walks on both cohort and period, and a year-level shock $\epsilon_t$ on the logit. The plotted trajectories below use the smooth surface $\mathrm{sigmoid}(\alpha + \mathrm{cohort}_c + \mathrm{period}_t)$ without $\epsilon$.
+with second-order random walks on both cohort and period. The model includes a year-level shock $\epsilon_t$, shared by all cohorts observed in year $t$. The shocks use a non-centered zero-sum normal prior, separating short-term period variation from the intercept and from the smooth RW2 period effect:
+
+$$
+z \sim \operatorname{ZeroSumNormal}(0,1),\quad
+\epsilon_t = \sigma_{\mathrm{short}} z_t,\quad
+\sum_t \epsilon_t = 0.
+$$
+
+The plotted trajectories below use the smooth surface $\mathrm{sigmoid}(\alpha + \mathrm{cohort}_c + \mathrm{period}_t)$ without $\epsilon$.
 
 ```python
 idata_path_pc = Path("idata") / f"model10_appendix_{VARIABLE}_rw2_overdisp.nc"
@@ -635,6 +643,10 @@ az.summary(
     idata_pc,
     var_names=["alpha", "sigma_c", "sigma_t", "sigma_short"],
     round_to=3,
+)
+print(
+    "max |sum_t epsilon|:",
+    float(np.abs(idata_pc.posterior["epsilon"].sum("year_idx")).max()),
 )
 ```
 
@@ -1193,7 +1205,7 @@ fig.savefig(
 
 ### Simplified model
 
-Readable form of the additive period–cohort model (same structure as ``build_period_cohort_model``), with ``rw2`` left factored out. Year-level $\varepsilon$ is written in centered form (same prior as the fitted model’s non-centered overdispersion).
+Readable form of the additive period–cohort model (same structure as ``build_period_cohort_model``), with ``rw2`` left factored out. Year-level $\varepsilon$ uses the same non-centered zero-sum construction as the fitted model.
 
 ```python
 n_c = len(cohorts)
@@ -1214,7 +1226,8 @@ with pm.Model(coords=coords) as period_cohort_model:
     period = rw2("period", n_t, sigma_t, dims="year_idx")
     eta = alpha + cohort[c_idx] + period[t_idx]
     sigma_eps = pm.Exponential("sigma_eps", lam=1.0 / SIGMA_SHORT_SCALE_PC)
-    eps = pm.Normal("eps", mu=0.0, sigma=sigma_eps, dims="year_idx")
+    eps_z = pm.ZeroSumNormal("eps_z", sigma=1.0, dims="year_idx")
+    eps = pm.Deterministic("eps", sigma_eps * eps_z, dims="year_idx")
     p = pm.math.sigmoid(eta + eps[t_idx])
     pm.Binomial(
         "y",
