@@ -12,23 +12,34 @@ jupyter:
     name: python3
 ---
 
-# Period-only models
+# Time series models
 
-[Run this notebook on Colab](https://colab.research.google.com/github/AllenDowney/YouWouldChooseNow/blob/main/notebooks/time_model_appendix.ipynb)
+[Run this notebook on Colab](https://colab.research.google.com/github/AllenDowney/YouWouldChooseNow/blob/main/notebooks/time_series_model_appendix.ipynb)
 
-This notebook walks through the period-only models from the talk, using as an example the General Social Survey item on sexual relations between two adults of the same sex. The outcome is the percent saying such relations are wrong to any degree (GSS response codes 1–3: always wrong, almost always wrong, or wrong only sometimes). Figure titles use a short stem of the survey question.
+This notebook is supporting material for [*You Would Choose Now: Measuring America's Progress Toward Fairness and Tolerance*](https://leanpub.com/ywcn).
+It walks through the primary time series model used in the book.
 
-We start from yearly weighted proportions, then fit a sequence of Bayesian models on the logit scale: a linear trend, a first-order random walk, a second-order random walk (RW2), and finally RW2 with year-level overdispersion. Each fit uses a calendar-year grid that extends five years past the last observed survey year so we can see how the latent trend behaves under extrapolation (those future years have no likelihood contribution).
+The notebook presents a series of models building toward the time series model used in the book.
+We start with purely descriptive stats -- yearly weighted proportions -- then fit a sequence of Bayesian models on the logit scale: a linear trend, a first-order random walk, a second-order random walk (RW2), and finally the time series model (RW2 with year-level overdispersion).
 
+Each fit uses a calendar-year grid that extends five years past the last observed survey year so we can see how the latent trend extrapolates.
+
+## Colab setup
+
+On Google Colab, upgrade the sampling stack before importing PyMC and nutpie.
 
 ```python
 # Colab ships an older PyMC; installing nutpie alone can pull ArviZ 1.x and break imports.
-# Upgrade the sampling stack together (matches this project's env: pymc>=6, arviz>=1.1, nutpie).
+# Upgrade the sampling stack to get pymc>=6, arviz>=1.1, nutpie.
 import sys
 
 if "google.colab" in sys.modules:
     %pip install -q "pymc>=6" "arviz>=1.1" nutpie
 ```
+
+## Imports
+
+Load the libraries used throughout the notebook.
 
 ```python
 import os
@@ -45,6 +56,8 @@ np.random.seed(17)
 ```
 
 ## Configuration
+
+Parameter cell: outcome variable, paths, figure styling, sampling defaults, and RW priors.
 
 ```python tags=["parameters"]
 VARIABLE = "homosex"
@@ -91,9 +104,18 @@ TREND_COLOR = "C0"
 OBS_COLOR = "0.45"
 ```
 
-## Notebook helpers
+## Output directories
 
-Small plotting and sampling utilities, plus a shared RW2 helper: non-centered second differences, free initial slope with level fixed at 0, then a mean-centered path.
+Create local folders for saved figures and posterior NetCDF files.
+
+```python
+os.makedirs("figs", exist_ok=True)
+os.makedirs("idata", exist_ok=True)
+```
+
+## Plot styling helpers
+
+Small utilities for left-aligned titles, subtitles, source lines, and spine removal.
 
 ```python
 def add_title(title, *, pad=FIG_TITLE_PAD):
@@ -136,8 +158,13 @@ def remove_spines():
         spine.set_visible(False)
     ax.xaxis.set_ticks_position("bottom")
     ax.yaxis.set_ticks_position("left")
+```
 
+## Sampling helper
 
+Load a saved posterior from disk when available; otherwise sample and write NetCDF.
+
+```python
 def load_idata_or_sample(model, filename, *, force_run=False, **sample_options):
     """Load NetCDF if present (unless ``force_run``), else ``pm.sample`` and save."""
     path = Path(filename)
@@ -147,8 +174,13 @@ def load_idata_or_sample(model, filename, *, force_run=False, **sample_options):
         idata = pm.sample(**sample_options)
     idata.to_netcdf(path)
     return idata
+```
 
+## RW2 helper
 
+Shared second-order random walk: non-centered second differences, free initial slope with level fixed at 0, then a mean-centered path.
+
+```python
 def rw2(name, n, sigma, *, dims=None):
     """Mean-centered RW2 with a free initial slope.
 
@@ -180,21 +212,14 @@ def rw2(name, n, sigma, *, dims=None):
         [pm.math.zeros(1), pm.math.cumsum(rw1)]
     )
     return pm.Deterministic(name, raw - pm.math.mean(raw), dims=dims)
-
-os.makedirs("figs", exist_ok=True)
-os.makedirs("idata", exist_ok=True)
 ```
 
-## Step 1 — Load data and yearly aggregates
+## Step 1 — Load data
 
-Load the GSS extract, code the binary outcome from the selected response codes, and aggregate to survey year with a Kish effective sample size. The year grid includes five future years beyond the last wave with data; those nodes appear in the latent trend but do not enter the likelihood. For this notebook we treat codes 1–3 as the “wrong” outcomes (always, almost always, and wrong only sometimes).
+Define a small helper that fetches the GSS extract only if it is not already on disk.
 
 ```python
 from urllib.request import urlretrieve
-
-# Repo layout: run from notebooks/ → ../data. Colab / flat checkout → ./data
-DATA_DIR = Path("..") / "data" if (Path("..") / "Makefile").is_file() else Path("data")
-GSS_PATH = DATA_DIR / GSS_FILENAME
 
 
 def download(url, path):
@@ -203,7 +228,14 @@ def download(url, path):
         path.parent.mkdir(parents=True, exist_ok=True)
         local, _ = urlretrieve(url, filename=str(path))
         print("Downloaded " + local)
+```
 
+Pick a data directory for repo vs Colab layouts, download the HDF file, and load the GSS table.
+
+```python
+# Repo layout: run from notebooks/ → ../data. Colab / flat checkout → ./data
+DATA_DIR = Path("..") / "data" if (Path("..") / "Makefile").is_file() else Path("data")
+GSS_PATH = DATA_DIR / GSS_FILENAME
 
 download(
     f"https://github.com/AllenDowney/YouWouldChooseNow/raw/main/data/{GSS_FILENAME}",
@@ -215,13 +247,21 @@ figure_xlim_year = (
     float(gss["year"].min()) - GSS_FIG_YEAR_PAD,
     float(gss["year"].max()) + GSS_FIG_YEAR_PAD,
 )
+```
 
+Treat selected response codes as “wrong,” drop missing values, and cast survey year to integer.
+For this notebook we use codes 1–3 (always, almost always, and wrong only sometimes).
+
+```python
 gss["y"] = gss[VARIABLE].isin(SELECTED_CODES).astype(float)
 gss.loc[gss[VARIABLE].isna(), "y"] = np.nan
 gss = gss.dropna(subset=["y", "year", WEIGHT_COL])
 gss["year"] = gss["year"].astype(int)
+```
 
+Compute the weighted proportion and Kish effective sample size within each survey year.
 
+```python
 def _weighted_year_stats(group: pd.DataFrame) -> pd.Series:
     y_vals = group["y"].to_numpy(dtype=float)
     weights = group[WEIGHT_COL].to_numpy(dtype=float)
@@ -231,8 +271,11 @@ def _weighted_year_stats(group: pd.DataFrame) -> pd.Series:
     p_weighted = float((y_vals * weights).sum() / total_weight)
     n_eff = (total_weight**2) / float((weights**2).sum())
     return pd.Series({"p_weighted": p_weighted, "n_eff": float(n_eff)})
+```
 
+Aggregate to survey year, extend the calendar grid five years past the last wave, and prepare binomial counts for the models below.
 
+```python
 by_year = (
     gss.groupby("year", group_keys=False)
     .apply(_weighted_year_stats, include_groups=False)
@@ -268,16 +311,18 @@ fig_xlim = (figure_xlim_year[0], float(year_max) + GSS_FIG_YEAR_PAD)
 # Centered/scaled calendar year on the full grid (including extrapolation years)
 year_scaled = (years_grid.astype(np.float64) - years_grid.mean()) / years_grid.std()
 year_scaled_t = pm.math.as_tensor(year_scaled)
+```
 
+Print coverage summaries and preview the first ten survey years.
+
+```python
 print(f"Respondents used: {len(gss):,}")
 print(f"Observed survey years: {n_observed} ({year_min}–{year_last_data})")
 print(f"Full grid: {n_years} years ({years_grid[0]}–{years_grid[-1]})")
 by_year.head(10)
 ```
 
-## Plotting helper
-
-Shared figure for all fitted models: posterior mean of the latent support curve with a credible band, observed weighted percentages, and a shaded region for the extrapolation years.
+Define the shared figure used for all fitted models: posterior mean of the latent support curve with a credible band, observed weighted percentages, and a shaded region for extrapolation years.
 
 ```python
 def make_subtitle(facet_line: str) -> str:
@@ -344,7 +389,7 @@ def plot_support_fit(
     return fig_path
 ```
 
-## Yearly weighted proportions and intervals
+## Observed Proportions
 
 For each survey year we use the weighted proportion $p$, the Kish effective sample size $n_{\mathrm{eff}}$, and rounded effective counts $y = \mathrm{round}(p \cdot n_{\mathrm{eff}})$. Error bars are Jeffreys intervals for a binomial with those rounded counts—the same $(y, n_{\mathrm{eff}})$ pair that enters the models below.
 
@@ -360,8 +405,11 @@ def jeffreys_interval(y: int, n: int, *, confidence_level: float) -> tuple[float
     hi = dist.ppf(1.0 - (1.0 - confidence_level) / 2.0)
     p = a / (a + b)
     return p, lo, hi
+```
 
+Apply Jeffreys intervals to observed years.
 
+```python
 yearly_obs = observed[["year", "p_weighted", "n_eff"]].copy()
 yearly_obs["n_eff_round"] = n_eff_binom
 yearly_obs["y_eff"] = y_eff
@@ -379,9 +427,7 @@ yearly_obs["p_hi_pct"] = yearly_obs["p_hi"] * 100
 yearly_obs[["year", "p_weighted", "n_eff", "n_eff_round", "y_eff", "p_lo", "p_hi"]]
 ```
 
-## Plot observed proportions
-
-Observed yearly percentages with Jeffreys intervals from the rounded Kish counts.
+Plot observed yearly percentages with Jeffreys intervals from the rounded Kish counts.
 
 ```python
 yerr_lo = yearly_obs["p_pct"] - yearly_obs["p_lo_pct"]
@@ -423,7 +469,7 @@ fig.savefig(
 )
 ```
 
-## Step 2 — Bayesian linear-logit model
+## Model 1: Bayesian linear-logit model
 
 As a baseline, take the period effect to be a single global linear trend on the logit scale:
 
@@ -432,6 +478,8 @@ $$
 $$
 
 where $\tilde{t}$ is survey year centered and scaled on the full grid (including extrapolation years). The likelihood is binomial in the rounded Kish counts: $y \sim \mathrm{Binomial}(n_{\mathrm{eff}}, p)$ with $p = \mathrm{sigmoid}(\eta)$ at observed years.
+
+Define the model:
 
 ```python
 with pm.Model(coords=coords) as model:
@@ -452,6 +500,14 @@ with pm.Model(coords=coords) as model:
     )
 ```
 
+Visualize the model structure:
+
+```python
+model.to_graphviz()
+```
+
+Sample or load the posterior:
+
 ```python
 idata_path = Path("idata") / f"time_model_appendix_{VARIABLE}_linear_logit_extrap{EXTRAPOLATE_YEARS}.nc"
 
@@ -469,14 +525,21 @@ idata = load_idata_or_sample(
         mass_matrix_gamma=1e-5,
     ),
 )
+```
+
+Summarize the linear-logit fit:
+
+```python
 az.summary(idata, var_names=["alpha", "beta"], round_to=4)
 ```
+
+Plot the linear-logit fit:
 
 ```python
 plot_support_fit(idata, subtitle="Linear logit model", fig_stem="linear_logit")
 ```
 
-## Step 3 — First-order random walk on the period effect
+## Model 2: First-order random walk on the period effect
 
 Replace the linear trend with a first-order Gaussian random walk: yearly innovations scaled by $\sigma_t$, initial level fixed at 0, then mean-centering for identifiability with the intercept:
 
@@ -485,7 +548,9 @@ $$
 \mathrm{period} \leftarrow \mathrm{period} - \bar{\mathrm{period}}
 $$
 
-A free initial level would cancel under mean-centering (the same redundancy as $x_0$ in the RW2 construction below), so it is omitted; $\alpha$ carries the overall level. The walk continues through the extrapolation years, still with no data likelihood there.
+A free initial level would cancel under mean-centering (the same redundancy as $x_0$ in the RW2 construction below), so it is omitted; $\alpha$ carries the overall level. The walk continues through the extrapolation years.
+
+Define the model:
 
 ```python
 with pm.Model(coords=coords) as model_rw1:
@@ -510,6 +575,14 @@ with pm.Model(coords=coords) as model_rw1:
     )
 ```
 
+Visualize the model structure:
+
+```python
+model_rw1.to_graphviz()
+```
+
+Sample or load the posterior:
+
 ```python
 idata_path_rw1 = Path("idata") / f"time_model_appendix_{VARIABLE}_rw1_extrap{EXTRAPOLATE_YEARS}.nc"
 
@@ -527,14 +600,21 @@ idata_rw1 = load_idata_or_sample(
         mass_matrix_gamma=1e-5,
     ),
 )
+```
+
+Summarize the RW1 fit:
+
+```python
 az.summary(idata_rw1, var_names=["alpha", "sigma_t"], round_to=4)
 ```
+
+Plot the RW1 fit:
 
 ```python
 plot_support_fit(idata_rw1, subtitle="Random walk model", fig_stem="rw1")
 ```
 
-## Step 4 — Second-order random walk (no overdispersion)
+## Model 3: Second-order random walk (no overdispersion)
 
 Next use a second-order random walk (RW2) for the period effect—smooth in level and slope—without year-level noise in the likelihood:
 
@@ -543,6 +623,8 @@ $$
 $$
 
 The RW2 helper defined earlier builds this component.
+
+Define the model:
 
 ```python
 with pm.Model(coords=coords) as model_rw2:
@@ -563,6 +645,14 @@ with pm.Model(coords=coords) as model_rw2:
     )
 ```
 
+Visualize the model structure:
+
+```python
+model_rw2.to_graphviz()
+```
+
+Sample or load the posterior:
+
 ```python
 idata_path_rw2 = Path("idata") / f"time_model_appendix_{VARIABLE}_rw2_extrap{EXTRAPOLATE_YEARS}.nc"
 
@@ -580,16 +670,23 @@ idata_rw2 = load_idata_or_sample(
         mass_matrix_gamma=1e-5,
     ),
 )
+```
+
+Summarize the RW2 fit:
+
+```python
 az.summary(idata_rw2, var_names=["alpha", "sigma_t"], round_to=4)
 ```
+
+Plot the RW2 fit:
 
 ```python
 plot_support_fit(idata_rw2, subtitle="RW2 model", fig_stem="rw2")
 ```
 
-## Step 5 — RW2 with year-level overdispersion
+## Model 4: Time series model
 
-The full period-only model adds mean-zero year-level deviations $\epsilon_t$ on the logit scale. The deviations use a non-centered zero-sum normal prior, so they represent short-term departures from the smooth RW2 trajectory without contributing an additional overall intercept. The plotted curve is $\mathrm{support}_t = \mathrm{sigmoid}(\eta_t)$, the latent RW2 trend; $\epsilon_t$ enters only the likelihood:
+The time series model adds mean-zero year-level deviations $\epsilon_t$ on the logit scale. The deviations use a non-centered zero-sum normal prior, so they represent short-term departures from the smooth RW2 trajectory without contributing an additional overall intercept. The plotted curve is $\mathrm{support}_t = \mathrm{sigmoid}(\eta_t)$, the latent RW2 trend; $\epsilon_t$ enters only the likelihood:
 
 $$
 \eta_t = \alpha + \mathrm{period}_t,\quad p_t = \mathrm{sigmoid}(\eta_t + \epsilon_t)\ \text{(observed years)}
@@ -600,6 +697,8 @@ z \sim \operatorname{ZeroSumNormal}(0,1),\quad
 \epsilon_t = \sigma_{\mathrm{short}} z_t,\quad
 \sum_t \epsilon_t = 0.
 $$
+
+Define the model:
 
 ```python
 with pm.Model(coords=coords) as model_tm:
@@ -624,6 +723,14 @@ with pm.Model(coords=coords) as model_tm:
     )
 ```
 
+Visualize the model structure:
+
+```python
+model_tm.to_graphviz()
+```
+
+Sample or load the posterior:
+
 ```python
 idata_path_tm = Path("idata") / f"time_model_appendix_{VARIABLE}_time_model_extrap{EXTRAPOLATE_YEARS}.nc"
 
@@ -641,6 +748,11 @@ idata_tm = load_idata_or_sample(
         mass_matrix_gamma=1e-5,
     ),
 )
+```
+
+Summarize the time series model:
+
+```python
 az.summary(idata_tm, var_names=["alpha", "sigma_t", "sigma_short"], round_to=4)
 print(
     "max |sum_t epsilon|:",
@@ -648,14 +760,17 @@ print(
 )
 ```
 
+Plot the time series model:
+
 ```python
-plot_support_fit(idata_tm, subtitle="RW2 model + overdispersion", fig_stem="time_model")
+plot_support_fit(idata_tm, subtitle="Time series model", fig_stem="time_model")
 ```
 
+## The Readable Version
 
-### Simplified model
+For the talk where I present this model, I use the following version of the model, revised to be as readable as possible.
 
-Same model as Step 5, written with the talk’s names: $\delta$ second differences (`delta`), $v_0$ initial slope (`v0`), `rw1` the first-difference path, `rw2` the integrated level path, and $\varepsilon$ year-level logit noise (`eps`). The initial level is fixed at 0: after mean-centering, a free $x_0$ would cancel exactly ($\mathrm{rw2}_{\mathrm{raw}}=x_0+g$ implies $\mathrm{rw2}=g-\bar g$), so $\alpha$ carries the overall level while $v_0$ remains (it controls the linear component). Year shocks use the same non-centered zero-sum construction as Step 5 (`eps_z` / `eps`). Scales are `sigma` / `sigma_eps` (talk: $\sigma$).
+Same time series model as Model 4, written with the talk’s names: $\delta$ second differences (`delta`), $v_0$ initial slope (`v0`), `rw1` the first-difference path, `rw2` the integrated level path, and $\varepsilon$ year-level logit noise (`eps`). The initial level is fixed at 0: after mean-centering, a free $x_0$ would cancel exactly ($\mathrm{rw2}_{\mathrm{raw}}=x_0+g$ implies $\mathrm{rw2}=g-\bar g$), so $\alpha$ carries the overall level while $v_0$ remains (it controls the linear component). Year shocks use the same non-centered zero-sum construction as Model 4 (`eps_z` / `eps`). Scales are `sigma` / `sigma_eps` (talk: $\sigma$).
 
 ```python
 with pm.Model(coords=coords) as period_model:
@@ -676,4 +791,10 @@ with pm.Model(coords=coords) as period_model:
     eps = pm.Deterministic("eps", sigma_eps * eps_z, dims="year_idx")
     p = pm.math.sigmoid(alpha + rw2 + eps)
     pm.Binomial("y", n=n_eff_binom, p=p[year_idx_obs], observed=y_eff)
+```
+
+Visualize the model structure:
+
+```python
+period_model.to_graphviz()
 ```

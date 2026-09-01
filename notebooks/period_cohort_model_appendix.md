@@ -16,18 +16,29 @@ jupyter:
 
 [Run this notebook on Colab](https://colab.research.google.com/github/AllenDowney/YouWouldChooseNow/blob/main/notebooks/period_cohort_model_appendix.ipynb)
 
-This notebook walks through the period–cohort models from the talk, using the same General Social Survey item as the period-only notebook: sexual relations between two adults of the same sex. The outcome is again the percent saying such relations are wrong to any degree (GSS response codes 1–3: always wrong, almost always wrong, or wrong only sometimes). Figure titles use a short stem of the survey question.
+This notebook is supporting material for [*You Would Choose Now: Measuring America's Progress Toward Fairness and Tolerance*](https://leanpub.com/ywcn).
+It walks through the period–cohort models from the talk, using the same General Social Survey item as the time series model appendix: sexual relations between two adults of the same sex.
 
-We start from weighted cohort × survey-year cells, look at the raw trajectories, then fit an additive period–cohort model with second-order random walks on cohort and period plus year-level overdispersion (no separate age effect: age is implied by survey year and birth cohort). Finally we fit a separate period-only model within each birth decade, so you can compare the shared period–cohort surface to decade-specific trends. Model definitions and plotting helpers are written out below.
+The outcome is the percent saying such relations are wrong to any degree (GSS response codes 1–3: always wrong, almost always wrong, or wrong only sometimes).
+We start from weighted cohort × survey-year cells, look at the raw trajectories, then fit an additive period–cohort model with second-order random walks on cohort and period plus year-level overdispersion (no separate age effect: age is implied by survey year and birth cohort).
+Finally we fit a separate time series model within each birth decade, so you can compare the shared period–cohort surface to decade-specific trends.
+
+## Colab setup
+
+On Google Colab, upgrade the sampling stack before importing PyMC and nutpie.
 
 ```python
 # Colab ships an older PyMC; installing nutpie alone can pull ArviZ 1.x and break imports.
-# Upgrade the sampling stack together (matches this project's env: pymc>=6, arviz>=1.1, nutpie).
+# Upgrade the sampling stack to get pymc>=6, arviz>=1.1, nutpie.
 import sys
 
 if "google.colab" in sys.modules:
     %pip install -q "pymc>=6" "arviz>=1.1" nutpie
 ```
+
+## Imports
+
+Load the libraries used throughout the notebook.
 
 ```python
 import os
@@ -45,6 +56,8 @@ np.random.seed(17)
 ```
 
 ## Configuration
+
+Parameter cell: outcome variable, paths, figure styling, sampling defaults, and RW priors.
 
 ```python tags=["parameters"]
 VARIABLE = "homosex"
@@ -94,16 +107,30 @@ GSS_NOMINAL_YEAR_EXCEPTIONS = {
     1993: 1992,
     2021: 2020,
 }
+```
 
+## Nominal year lattice
 
+Map fielding years onto the two-year nominal period grid used in the period–cohort model.
+
+```python
 def gss_nominal_year(year: int) -> int:
     y = int(year)
     return GSS_NOMINAL_YEAR_EXCEPTIONS.get(y, y + (y % 2))
 ```
 
-## Notebook helpers
+## Output directories
 
-Sampling cache helper, figure chrome, a shared RW2 helper, the additive period–cohort model, and the period-only model used for decade fits.
+Create local folders for saved figures and posterior NetCDF files.
+
+```python
+os.makedirs("figs", exist_ok=True)
+os.makedirs("idata", exist_ok=True)
+```
+
+## Plot styling helpers
+
+Small utilities for left-aligned titles, subtitles, source lines, and spine removal.
 
 ```python
 def add_title(title, *, pad=FIG_TITLE_PAD):
@@ -146,8 +173,13 @@ def remove_spines():
         spine.set_visible(False)
     ax.xaxis.set_ticks_position("bottom")
     ax.yaxis.set_ticks_position("left")
+```
 
+## Sampling helper
 
+Load a saved posterior from disk when available; otherwise sample and write NetCDF.
+
+```python
 def load_idata_or_sample(model, filename, *, force_run=False, **sample_options):
     """Load NetCDF if present (unless ``force_run``), else ``pm.sample`` and save."""
     path = Path(filename)
@@ -157,8 +189,11 @@ def load_idata_or_sample(model, filename, *, force_run=False, **sample_options):
         idata = pm.sample(**sample_options)
     idata.to_netcdf(path)
     return idata
+```
 
+## Axis limit helpers
 
+```python
 def xlim_year(years):
     s = pd.Series(years).dropna()
     return (float(s.min()) - GSS_FIG_YEAR_PAD, float(s.max()) + GSS_FIG_YEAR_PAD)
@@ -167,8 +202,13 @@ def xlim_year(years):
 def xlim_cohort(cohorts):
     s = pd.Series(cohorts).dropna()
     return (float(s.min()) - GSS_FIG_COHORT_PAD, float(s.max()) + GSS_FIG_COHORT_PAD)
+```
 
+## RW2 helper
 
+Shared second-order random walk: non-centered second differences, free initial slope with level fixed at 0, then a mean-centered path.
+
+```python
 def rw2(name, n, sigma, *, dims=None):
     """Mean-centered RW2 with a free initial slope.
 
@@ -200,8 +240,13 @@ def rw2(name, n, sigma, *, dims=None):
         [pm.math.zeros(1), pm.math.cumsum(rw1)]
     )
     return pm.Deterministic(name, raw - pm.math.mean(raw), dims=dims)
+```
 
+## Period–cohort model builder
 
+Additive period–cohort specification: RW2 cohort + RW2 period + year-level overdispersion, Binomial cells.
+
+```python
 def build_period_cohort_model(cells, cohorts, years_grid):
     """Additive period–cohort: RW2 cohort + RW2 period + year-level overdispersion, Binomial cells."""
     n_cohorts = len(cohorts)
@@ -234,10 +279,15 @@ def build_period_cohort_model(cells, cohorts, years_grid):
             dims="cell_idx",
         )
     return model
+```
 
+## Time series model builder
 
+Time series model used for decade fits: RW2 period + year-level overdispersion on Kish yearly counts.
+
+```python
 def build_period_model(observed, years_grid):
-    """Period-only RW2 + year-level overdispersion on Kish yearly counts."""
+    """Time series model: RW2 period + year-level overdispersion on Kish yearly counts."""
     n_years = len(years_grid)
     year_idx_obs = observed["year_idx"].to_numpy()
     p_w = observed["p_weighted"].to_numpy(dtype=float)
@@ -256,8 +306,11 @@ def build_period_model(observed, years_grid):
         p_obs = pm.math.sigmoid(eta[year_idx_obs] + epsilon[year_idx_obs])
         pm.Binomial("y", n=n_eff, p=p_obs, observed=y_eff)
     return model
+```
 
+## Posterior summary and interpolation helpers
 
+```python
 def summarize_probability_draws(prob_samples, axis=(0, 1)):
     """Posterior mean and equal-tailed 84% interval (8th–92nd percentiles)."""
     mean = prob_samples.mean(axis=axis)
@@ -321,8 +374,13 @@ def plot_probability_summary_band(ax, df, x_col, *, color, label=None):
 
 def make_subtitle(facet_line: str) -> str:
     return f"{OUTCOME_YLABEL}\n{facet_line}"
+```
 
+## Trajectory plotting helper
 
+One line per group; connect-the-dots unless ``interpolate`` (model surfaces).
+
+```python
 def plot_raw_trajectories(
     traj: pd.DataFrame,
     *,
@@ -408,22 +466,14 @@ def plot_raw_trajectories(
         bbox_extra_artists=[subtext_obj],
     )
     return fig_path
-
-
-os.makedirs("figs", exist_ok=True)
-os.makedirs("idata", exist_ok=True)
 ```
 
-## Step 1 — Load cohort × year cells
+## Load data
 
-Load the GSS extract, code the binary outcome, map fielding years onto the two-year nominal period lattice, and aggregate to birth-cohort × nominal-year cells with Kish effective sample size. We keep respondents born in 1900 or later.
+Define a small helper that fetches the GSS extract only if it is not already on disk.
 
 ```python
 from urllib.request import urlretrieve
-
-# Repo layout: run from notebooks/ → ../data. Colab / flat checkout → ./data
-DATA_DIR = Path("..") / "data" if (Path("..") / "Makefile").is_file() else Path("data")
-GSS_PATH = DATA_DIR / GSS_FILENAME
 
 
 def download(url, path):
@@ -432,7 +482,14 @@ def download(url, path):
         path.parent.mkdir(parents=True, exist_ok=True)
         local, _ = urlretrieve(url, filename=str(path))
         print("Downloaded " + local)
+```
 
+Pick a data directory for repo vs Colab layouts, download the HDF file, and load the GSS table.
+
+```python
+# Repo layout: run from notebooks/ → ../data. Colab / flat checkout → ./data
+DATA_DIR = Path("..") / "data" if (Path("..") / "Makefile").is_file() else Path("data")
+GSS_PATH = DATA_DIR / GSS_FILENAME
 
 download(
     f"https://github.com/AllenDowney/YouWouldChooseNow/raw/main/data/{GSS_FILENAME}",
@@ -440,6 +497,11 @@ download(
 )
 
 micro = pd.read_hdf(GSS_PATH, GSS_HDF_KEY).copy()
+```
+
+Code the binary outcome, map fielding years onto the nominal lattice, and keep respondents born in 1900 or later.
+
+```python
 micro["y"] = micro[VARIABLE].isin(SELECTED_CODES).astype(float)
 micro.loc[micro[VARIABLE].isna(), "y"] = np.nan
 micro = micro.dropna(subset=["cohort", "year", "y", WEIGHT_COL])
@@ -451,8 +513,11 @@ if micro["nominal_year"].isna().any():
     missing = sorted(micro.loc[micro["nominal_year"].isna(), "year"].unique())
     raise ValueError(f"Survey years could not be mapped to nominal years: {missing}")
 micro["nominal_year"] = micro["nominal_year"].astype(int)
+```
 
+Compute weighted cell statistics for each birth-cohort × nominal-year pair.
 
+```python
 def _weighted_cell_stats(group: pd.DataFrame) -> pd.Series:
     y_vals = group["y"].to_numpy(dtype=float)
     weights = group[WEIGHT_COL].to_numpy(dtype=float)
@@ -469,8 +534,11 @@ def _weighted_cell_stats(group: pd.DataFrame) -> pd.Series:
             "p_weighted": p_weighted,
         }
     )
+```
 
+Aggregate to cohort × nominal-year cells and build the even-year period lattice.
 
+```python
 cells = (
     micro.groupby(["cohort", "nominal_year"], group_keys=False)
     .apply(_weighted_cell_stats, include_groups=False)
@@ -502,7 +570,11 @@ n_respondents_used = len(micro)
 
 fig_xlim = xlim_year(cells["nominal_year"])
 fig_xlim = (fig_xlim[0], fig_xlim[1] + GSS_FIG_COHORT_TRAJECTORY_XHI_PAD)
+```
 
+Print coverage summaries and inspect cell sample sizes.
+
+```python
 print(f"Respondents used: {n_respondents_used:,}")
 print(f"Cells: {len(cells):,}")
 print(f"Cohorts: {cells['cohort'].min()}–{cells['cohort'].max()} ({n_cohorts})")
@@ -514,7 +586,7 @@ print(
 cells["n"].describe()
 ```
 
-### Raw cohort trajectories
+## Raw trajectories
 
 One line per birth year: observed cell percent by nominal survey year. Connect the dots (no smooth interpolation). No model — noise and sparsity are the point.
 
@@ -528,9 +600,7 @@ plot_raw_trajectories(
 )
 ```
 
-### Raw trajectories by decade of birth
-
-Same connect-the-dots plot, but cells are pooled within each birth decade (weighted by cell $n$).
+Pool cells within each birth decade (weighted by cell $n$), then plot the same connect-the-dots view by decade.
 
 ```python
 cells_dec = cells.copy()
@@ -550,9 +620,7 @@ plot_raw_trajectories(
 )
 ```
 
-### Heatmap of raw cell percents
-
-Cohort × nominal year; empty cells stay blank so sparsity is visible.
+Cohort × nominal year heatmap; empty cells stay blank so sparsity is visible.
 
 ```python
 pivot = cells.pivot_table(
@@ -599,7 +667,7 @@ fig.savefig(
 )
 ```
 
-## Step 2 — Additive period–cohort with overdispersion
+## Model 1: Additive period–cohort model
 
 Fit the full additive specification used in the talk:
 
@@ -618,9 +686,23 @@ $$
 
 The plotted trajectories below use the smooth surface $\mathrm{sigmoid}(\alpha + \mathrm{cohort}_c + \mathrm{period}_t)$ without $\epsilon$.
 
+Define the model:
+
+```python
+model_pc = build_period_cohort_model(cells, cohorts, years_grid)
+```
+
+Visualize the model structure:
+
+```python
+model_pc.to_graphviz()
+```
+
+Sample or load the posterior:
+
 ```python
 idata_path_pc = Path("idata") / f"model10_appendix_{VARIABLE}_rw2_overdisp.nc"
-model_pc = build_period_cohort_model(cells, cohorts, years_grid)
+
 idata_pc = load_idata_or_sample(
     model_pc,
     str(idata_path_pc),
@@ -635,6 +717,11 @@ idata_pc = load_idata_or_sample(
         mass_matrix_gamma=1e-5,
     ),
 )
+```
+
+Summarize the period–cohort fit:
+
+```python
 az.summary(
     idata_pc,
     var_names=["alpha", "sigma_c", "sigma_t", "sigma_short"],
@@ -646,11 +733,7 @@ print(
 )
 ```
 
-### Model trajectories
-
-Posterior-mean cell probabilities $\mathrm{sigmoid}(\alpha + \mathrm{cohort}_c + \mathrm{period}_t)$, one line per birth year, with light interpolation for plotting.
-
-For cohorts observed only once, add a ghost cell one year earlier: the logit midpoint between the model value at $t-2$ and the observed year $t$.
+Build posterior-mean cell probabilities $\mathrm{sigmoid}(\alpha + \mathrm{cohort}_c + \mathrm{period}_t)$ for plotting. For cohorts observed only once, add a ghost cell one year earlier: the logit midpoint between the model value at $t-2$ and the observed year $t$.
 
 ```python
 alpha_mean = float(idata_pc.posterior["alpha"].mean(dim=("chain", "draw")).values)
@@ -712,7 +795,11 @@ for cohort in single_cohorts:
 
 if ghost_rows:
     traj_pc = pd.concat([traj_pc, pd.DataFrame(ghost_rows)], ignore_index=True)
+```
 
+Plot model cohort trajectories (one line per birth year, with light interpolation for plotting).
+
+```python
 plot_raw_trajectories(
     traj_pc,
     group_col="cohort",
@@ -721,7 +808,11 @@ plot_raw_trajectories(
     linewidth=0.8,
     interpolate=True,
 )
+```
 
+Plot model decade trajectories.
+
+```python
 plot_raw_trajectories(
     decade_pc,
     group_col="decade",
@@ -732,9 +823,7 @@ plot_raw_trajectories(
 )
 ```
 
-### Standardized period and cohort effects
-
-Period curve with a fixed reference cohort mix (weights proportional to summed survey weights in each cohort, not Kish $n_{\mathrm{eff}}$); cohort curve with uniform weight on observed nominal years. Bands are equal-tailed 84% intervals on the probability scale. These curves use the smooth surface $\mathrm{sigmoid}(\alpha + \mathrm{cohort}_c + \mathrm{period}_t)$ and omit year-level $\epsilon$.
+Compute standardized period and cohort effect curves. Period curve uses a fixed reference cohort mix (weights proportional to summed survey weights in each cohort); cohort curve uses uniform weight on observed nominal years. Bands are equal-tailed 84% intervals on the probability scale. These curves use the smooth surface $\mathrm{sigmoid}(\alpha + \mathrm{cohort}_c + \mathrm{period}_t)$ and omit year-level $\epsilon$.
 
 ```python
 alpha_samples = idata_pc.posterior["alpha"].values
@@ -777,7 +866,11 @@ p_cohort_uniform_years = expit(eta_cohort_uniform_years).mean(axis=3)
 
 cohort_uniform_years_df = summarize_probability_draws(p_cohort_uniform_years)
 cohort_uniform_years_df.insert(0, "cohort", model_cohorts)
+```
 
+Plot the standardized period effect.
+
+```python
 fig, ax = plt.subplots(figsize=FIGSIZE)
 plot_probability_summary_band(ax, standardized_df, "nominal_year", color=PERIOD_EFFECT_COLOR)
 ax.grid(True, alpha=0.3)
@@ -791,7 +884,11 @@ add_subtitle(make_subtitle(FACET_PERIOD_EFFECT))
 subtext_obj = add_subtext(SOURCE_SUBTEXT)
 fig_path = Path("figs") / f"model10_appendix_{VARIABLE}_time_standardized.png"
 fig.savefig(str(fig_path), dpi=FIG_DPI, bbox_inches="tight", bbox_extra_artists=[subtext_obj])
+```
 
+Plot the standardized cohort effect.
+
+```python
 fig_xlim_cohort = xlim_cohort(model_cohorts)
 fig, ax = plt.subplots(figsize=FIGSIZE)
 plot_probability_summary_band(ax, cohort_uniform_years_df, "cohort", color=COHORT_EFFECT_COLOR)
@@ -808,11 +905,13 @@ fig_path = Path("figs") / f"model10_appendix_{VARIABLE}_cohort_standardized.png"
 fig.savefig(str(fig_path), dpi=FIG_DPI, bbox_inches="tight", bbox_extra_artists=[subtext_obj])
 ```
 
-### Time series + standardized period (attribution)
+## Time series model + standardized period (attribution)
 
-Overlay the period-only time-model trend (composition changing over time) with the standardized period curve (fixed cohort mix). Attribution below decomposes the **smooth** modeled national change $\mathrm{sigmoid}(\alpha + \mathrm{cohort} + \mathrm{period})$ — year-level $\epsilon$ is excluded — into a **period effect** vs a **cohort effect**, using summed survey weights for composition and a two-factor Shapley average so the split is not order-dependent. Percentage-point components are primary; share ratios are secondary (median of draw-level ratios when $|\Delta_{\mathrm{total}}|$ is safely away from zero). The full window is a synthetic counterfactual (1970s composition held into recent years); a post-1990 window is reported as sensitivity.
+Overlay the national time series model trend (composition changing over time) with the standardized period curve (fixed cohort mix). Attribution below decomposes the **smooth** modeled national change $\mathrm{sigmoid}(\alpha + \mathrm{cohort} + \mathrm{period})$ — year-level $\epsilon$ is excluded — into a **period effect** vs a **cohort effect**, using summed survey weights for composition and a two-factor Shapley average so the split is not order-dependent. Percentage-point components are primary; share ratios are secondary (median of draw-level ratios when $|\Delta_{\mathrm{total}}|$ is safely away from zero). The full window is a synthetic counterfactual (1970s composition held into recent years); a post-1990 window is reported as sensitivity.
 
-Requires the companion time-model appendix idata at `idata/time_model_appendix_{VARIABLE}_time_model_extrap5.nc` (run that notebook first if missing).
+Requires the companion time series model idata at `idata/time_model_appendix_{VARIABLE}_time_model_extrap5.nc` (run the time series model appendix first if missing).
+
+Build the smooth trend grid and composition weights from summed survey weights.
 
 ```python
 TIME_MODEL_COLOR = "C0"
@@ -841,8 +940,11 @@ with np.errstate(invalid="ignore", divide="ignore"):
     w = np.where(row_sums > 0, w / row_sums, 0.0)
 
 years_with_data = sorted(int(y) for y in model_years if w[year_i[int(y)]].sum() > 0)
+```
 
+Define Shapley decomposition helpers.
 
+```python
 def marginal_at(p_g, weights, weight_year, period_year):
     """M(w_{weight_year}, period_year): composition × period on probability scale."""
     return np.tensordot(
@@ -927,7 +1029,12 @@ def report_decomposition(name, d):
     else:
         print("  shares omitted (|Δ_total| too small or crosses ~0 in draws)")
     return attr_line
+```
 
+Run the Shapley decomposition for the full overlap window and a post-1990 sensitivity window.
+
+```python
+from IPython.display import Markdown, display
 
 # Full overlap window + post-1990 sensitivity
 t0_full, t1_full = years_with_data[0], years_with_data[-1]
@@ -960,8 +1067,6 @@ for name, t0, t1 in windows:
     )
 
 decomp_summary = pd.DataFrame(decomp_rows)
-from IPython.display import Markdown, display
-
 display(
     Markdown(
         "Shapley decomposition of the smooth national change "
@@ -969,8 +1074,11 @@ display(
         + decomp_summary.to_markdown(index=False)
     )
 )
+```
 
-# --- Overlay figure (full-window attribution in subtitle) ---
+Plot the standardized period curve with the national time series model overlay (full-window attribution in subtitle).
+
+```python
 fig, ax = plt.subplots(figsize=FIGSIZE)
 facet = FACET_PERIOD_EFFECT
 if TIME_MODEL_IDATA.is_file():
@@ -980,7 +1088,7 @@ if TIME_MODEL_IDATA.is_file():
     tm_mean = support.mean(dim=("chain", "draw")).values * 100
     tm_lo = support.quantile(0.03, dim=("chain", "draw")).values * 100
     tm_hi = support.quantile(0.97, dim=("chain", "draw")).values * 100
-    # Match observed data span (drop time-model extrapolation beyond fielded years)
+    # Match observed data span (drop time series model extrapolation beyond fielded years)
     obs_lo, obs_hi = years_with_data[0], years_with_data[-1]
     in_obs = (tm_years >= obs_lo) & (tm_years <= obs_hi)
     tm_years = tm_years[in_obs]
@@ -990,11 +1098,11 @@ if TIME_MODEL_IDATA.is_file():
     if len(tm_years) >= 2:
         xf, lo, m, hi = interpolate_1d_band_for_plot(tm_years, tm_lo, tm_mean, tm_hi)
         ax.fill_between(xf, lo, hi, color=TIME_MODEL_COLOR, alpha=0.22, linewidth=0, zorder=1)
-        ax.plot(xf, m, color=TIME_MODEL_COLOR, linewidth=2, label="Time model", zorder=2)
+        ax.plot(xf, m, color=TIME_MODEL_COLOR, linewidth=2, label="Time series model", zorder=2)
     elif len(tm_years) == 1:
         ax.fill_between(tm_years, tm_lo, tm_hi, color=TIME_MODEL_COLOR, alpha=0.22, linewidth=0, zorder=1)
-        ax.plot(tm_years, tm_mean, color=TIME_MODEL_COLOR, linewidth=2, label="Time model", zorder=2)
-    facet = f"{FACET_PERIOD_EFFECT} · Time model"
+        ax.plot(tm_years, tm_mean, color=TIME_MODEL_COLOR, linewidth=2, label="Time series model", zorder=2)
+    facet = f"{FACET_PERIOD_EFFECT} · Time series model"
 else:
     print(f"Missing {TIME_MODEL_IDATA}; plotting standardized period only.")
 
@@ -1018,20 +1126,15 @@ remove_spines()
 add_title(DISPLAY_TITLE)
 add_subtitle(make_subtitle(facet))
 subtext_obj = add_subtext(SOURCE_SUBTEXT)
-fig_path = Path("figs") / f"model10_appendix_{VARIABLE}_time_standardized_time_model.png"
+fig_path = Path("figs") / f"model10_appendix_{VARIABLE}_time_standardized_time_series.png"
 fig.savefig(str(fig_path), dpi=FIG_DPI, bbox_inches="tight", bbox_extra_artists=[subtext_obj])
 ```
 
-Shapley decomposition of the smooth national change ($\varepsilon$ excluded); composition weights from summed survey weights.
+## Model 2: Time series model by birth decade
 
-| Interval | Δ total | Period | Cohort | Period share |
-|----------|---------|--------|--------|--------------|
-| 1974–2024 | −43.0 pp | −19.2 pp | −23.8 pp | 45% |
-| 1990–2024 | −43.3 pp | −27.4 pp | −15.9 pp | 63% |
+For each decade of birth, fit the same time series model specification as in the companion appendix (RW2 + year-level overdispersion), using only respondents born in that decade. Survey years are calendar years here (not the nominal lattice). Decades with fewer than `MIN_OBSERVED_YEARS` waves are skipped.
 
-## Step 3 — Period-only model by birth decade
-
-For each decade of birth, fit the same period-only specification as in the companion notebook (RW2 + year-level overdispersion), using only respondents born in that decade. Survey years are calendar years here (not the nominal lattice). Decades with fewer than `MIN_OBSERVED_YEARS` waves are skipped.
+Define the yearly aggregation helper for a birth-cohort window.
 
 ```python
 def yearly_aggregates_for_cohort_range(micro_df: pd.DataFrame, cohort_lo: int, cohort_hi: int):
@@ -1072,8 +1175,11 @@ def yearly_aggregates_for_cohort_range(micro_df: pd.DataFrame, cohort_lo: int, c
         "year_last_data": year_last_data,
         "n_respondents": len(sub),
     }
+```
 
+Fit one time series model per birth decade.
 
+```python
 decades = sorted(((cells["cohort"] // 10) * 10).unique())
 decade_fits = []
 
@@ -1113,13 +1219,11 @@ for decade in decades:
 print(f"Fitted / loaded decades: {[d['decade'] for d in decade_fits]}")
 ```
 
-### Plot decade trends
-
-One latent-support curve per birth decade (posterior mean + light 94% band), with the decade's raw weighted percentages as open circles.
+Plot one latent-support curve per birth decade (posterior mean + light 94% band), with each decade's raw weighted percentages as open circles.
 
 ```python
 if not decade_fits:
-    raise RuntimeError("No decade time models were fit or loaded; check MIN_OBSERVED_YEARS / data.")
+    raise RuntimeError("No decade time series models were fit or loaded; check MIN_OBSERVED_YEARS / data.")
 
 cmap = plt.cm.plasma.reversed()
 decades_fit = [d["decade"] for d in decade_fits]
@@ -1186,7 +1290,7 @@ ax.grid(True, alpha=0.3)
 
 remove_spines()
 add_title(DISPLAY_TITLE)
-add_subtitle(make_subtitle("Time model by birth decade"))
+add_subtitle(make_subtitle("Time series model by birth decade"))
 subtext_obj = add_subtext(SOURCE_SUBTEXT)
 
 fig_path = Path("figs") / f"model10_appendix_{VARIABLE}_timemodel_by_decade.png"
@@ -1198,8 +1302,9 @@ fig.savefig(
 )
 ```
 
+## The Readable Version
 
-### Simplified model
+For the talk where I present this model, I use the following version of the period–cohort model, revised to be as readable as possible.
 
 Readable form of the additive period–cohort model (same structure as ``build_period_cohort_model``), with ``rw2`` left factored out. Year-level $\varepsilon$ uses the same non-centered zero-sum construction as the fitted model.
 
@@ -1232,4 +1337,10 @@ with pm.Model(coords=coords) as period_cohort_model:
         observed=cells["y"].values,
         dims="cell_idx",
     )
+```
+
+Visualize the model structure:
+
+```python
+period_cohort_model.to_graphviz()
 ```
