@@ -11,13 +11,13 @@ Barack Obama posed this question in 2016, and it motivates the book.
 
 [Allen Downey](https://allendowney.com), data scientist and author of [*Probably Overthinking It*](https://probablyoverthinking.it), uses decades of data from national surveys to see whether America has become fairer and more tolerant. He puts changing attitudes alongside the historical record of civil rights and legal protections — and asks, "Would you choose now?"
 
-An early access edition is on [LeanPub](https://leanpub.com/ywcn). The introduction and a chapter about the decline of homophobia are available now (about 50 pages), with additional chapters planned monthly and a complete draft expected in early 2027.
+An early access edition is on [LeanPub](https://leanpub.com/ywcn). It includes an introduction and chapters on sexual orientation and gender (about 80 pages). I plan to release additional chapters monthly and a complete draft in early 2027.
 
 Three editions are available in PDF and EPUB on LeanPub:
 
 - [**Free Sample**](https://leanpub.com/ywcn) — introduction only
 - [**Community Edition**](https://leanpub.com/ywcn) — introduction and first chapter (with email signup)
-- [**Early Access Edition**](https://leanpub.com/ywcn) — all currently available chapters, plus updates through the final edition
+- [**Early Access Edition**](https://leanpub.com/ywcn) — all current chapters, plus updates through the final edition
 
 This is a work in progress. Comments and suggestions are welcome on the [LeanPub forum](https://leanpub.com/forum/ywcn) or via [GitHub issues](https://github.com/AllenDowney/YouWouldChooseNow/issues).
 
