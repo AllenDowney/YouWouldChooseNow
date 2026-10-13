@@ -10,9 +10,16 @@ help:
 	@echo "  make deploy       - Build and deploy to GitHub Pages"
 	@echo "  make serve        - Build locally and serve at http://localhost:8000"
 
+# Page-view counter: each page loads greenteapress.com/gh.gif, counted from the
+# greenteapress.com access logs (GreenTeaPress scripts/log_report.py). No cookies,
+# no third party. Jupyter Book 2 has no setting for this, so it is added after the build.
+export COUNTER = <script>new Image().src="https://greenteapress.com/gh.gif?u="+encodeURIComponent(location.href)+"&r="+encodeURIComponent(document.referrer)</script>
+
 build:
 	BASE_URL=/YouWouldChooseNow/ jupyter book build --html
 	touch _build/html/.nojekyll
+	find _build/html -name '*.html' -exec grep -L 'greenteapress.com/gh.gif' {} + | \
+		xargs -r perl -pi -e 's#</body>#$$ENV{COUNTER}</body>#'
 
 build-local:
 	jupyter book build --html
