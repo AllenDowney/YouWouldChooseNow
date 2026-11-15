@@ -20,7 +20,8 @@ This is a work in progress. Comments and suggestions are welcome on the [LeanPub
 
 ## Technical Appendix
 
-These two Jupyter notebooks walk through the statistical models used in the book. Open either link to run on Google Colab (no local setup required):
+These Jupyter notebooks walk through the statistical models and analyses used in the book. Open any link to run on Google Colab (no local setup required):
 
 - [**Time series models**](https://colab.research.google.com/github/AllenDowney/YouWouldChooseNow/blob/main/notebooks/time_series_model_appendix.ipynb) — estimate changes over time
 - [**Period–cohort models**](https://colab.research.google.com/github/AllenDowney/YouWouldChooseNow/blob/main/notebooks/period_cohort_model_appendix.ipynb) — estimate the contributions of the period and cohort components
+- [**Voting rights after *Shelby County***](https://colab.research.google.com/github/AllenDowney/YouWouldChooseNow/blob/main/notebooks/voting_rights_appendix.ipynb) — did voting restrictions and the end of preclearance reopen the racial turnout gap?

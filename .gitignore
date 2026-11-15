@@ -229,3 +229,7 @@ notebooks/outputs/
 
 # Jupyter Book local build
 jb/_build/
+
+# Downloaded by notebooks at run time
+data/voting_rights/replication.zip
+notebooks/data/

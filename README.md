@@ -25,10 +25,11 @@ This is a work in progress. Comments and suggestions are welcome on the [LeanPub
 
 ### Run the appendices on Colab
 
-Technical appendices that walk through the Bayesian models used in the book. Open either link to run on Google Colab (no local setup required):
+Technical appendices that walk through the models and analyses used in the book. Open any link to run on Google Colab (no local setup required):
 
 - [**Time series models**](https://colab.research.google.com/github/AllenDowney/YouWouldChooseNow/blob/main/notebooks/time_series_model_appendix.ipynb) — national trend over survey years (linear logit → RW1 → RW2 → time series model with overdispersion), using GSS attitudes toward same-sex relations
 - [**Period–cohort models**](https://colab.research.google.com/github/AllenDowney/YouWouldChooseNow/blob/main/notebooks/period_cohort_model_appendix.ipynb) — additive period–cohort surface and decade-specific time series models on the same outcome
+- [**Voting rights after *Shelby County***](https://colab.research.google.com/github/AllenDowney/YouWouldChooseNow/blob/main/notebooks/voting_rights_appendix.ipynb) — the reopening of the White–Black turnout gap since 2012, whether it changed when states adopted or dropped voting restrictions, and a replication of a published study of the end of preclearance, using voter files, the CPS and the CES
 
 Jupytext Markdown (`.md`) is the canonical notebook source; `.ipynb` files are generated for Colab.
 
@@ -37,7 +38,7 @@ Jupytext Markdown (`.md`) is the canonical notebook source; `.ipynb` files are g
 | Path | Purpose |
 |------|---------|
 | [`notebooks/`](notebooks/) | Appendix notebooks (Jupytext `.md` + Colab `.ipynb`) |
-| [`data/`](data/) | GSS extract used by the notebooks (`gss_extract_2024_r3.hdf`) |
+| [`data/`](data/) | GSS extract used by the model notebooks (`gss_extract_2024_r3.hdf`); turnout, voting-policy and county data for the voting-rights notebook ([`data/voting_rights/`](data/voting_rights/)) |
 | [`jb/`](jb/) | MyST site source (landing page with Colab links; `make build-local` in `jb/`) |
 | [`scripts/`](scripts/) | Repo maintenance helpers |
 
