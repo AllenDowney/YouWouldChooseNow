@@ -233,3 +233,6 @@ jb/_build/
 # Downloaded by notebooks at run time
 data/voting_rights/replication.zip
 notebooks/data/
+
+# Executed copy of the voting-rights appendix (jb Makefile: appendix)
+jb/*.ipynb

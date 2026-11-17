@@ -10,6 +10,8 @@ and the theme writes no canonical link. This script:
 - rewrites the sitemap with the published URLs (with a trailing slash, which is
   what GitHub Pages serves without a redirect), leaving out pages whose canonical
   version is elsewhere;
+- collapses the doubled title on the landing page (the theme writes "<page> - <site>",
+  which is "You Would Choose Now - You Would Choose Now" when they match);
 - adds a canonical link and og:url to each page. Pages in CANONICAL_ELSEWHERE
   point to the original (the blog posts first appeared on Substack);
 - makes og:image an absolute URL, which link previews need;
@@ -31,6 +33,7 @@ COUNTER = ('<script>new Image().src="https://greenteapress.com/gh.gif?u="+encode
            '+"&r="+encodeURIComponent(document.referrer)</script>')
 
 LOCALHOST = re.compile(r'http://localhost:\d+')
+DOUBLED = re.compile(r'(<title>|<meta property="og:title" content=")([^<"]+) - \2(</title>|")')
 
 
 def page_url(slug):
@@ -40,6 +43,7 @@ def page_url(slug):
 def fix_page(path, slug):
     s = path.read_text(encoding='utf-8')
     s = LOCALHOST.sub(ORIGIN, s)
+    s = DOUBLED.sub(r'\1\2\3', s)
     s = re.sub(r'(<meta (?:property="og:image"|name="image") content=")' + re.escape(BASE) + r'/+',
                r'\g<1>' + SITE + '/', s)
     canonical = CANONICAL_ELSEWHERE.get(slug, page_url(slug))

@@ -1,3 +1,7 @@
+---
+description: "A book by Allen Downey that uses decades of national survey data to measure whether America has become fairer and more tolerant."
+---
+
 # You Would Choose Now
 
 [*You Would Choose Now: Measuring America's Progress Toward Fairness and Tolerance*](https://leanpub.com/ywcn)
@@ -20,8 +24,8 @@ This is a work in progress. Comments and suggestions are welcome on the [LeanPub
 
 ## Technical Appendix
 
-These Jupyter notebooks walk through the statistical models and analyses used in the book. Open any link to run on Google Colab (no local setup required):
+These Jupyter notebooks walk through the statistical models and analyses used in the book. They run on Google Colab, with no local setup required:
 
 - [**Time series models**](https://colab.research.google.com/github/AllenDowney/YouWouldChooseNow/blob/main/notebooks/time_series_model_appendix.ipynb) — estimate changes over time
 - [**Period–cohort models**](https://colab.research.google.com/github/AllenDowney/YouWouldChooseNow/blob/main/notebooks/period_cohort_model_appendix.ipynb) — estimate the contributions of the period and cohort components
-- [**Voting rights after *Shelby County***](https://colab.research.google.com/github/AllenDowney/YouWouldChooseNow/blob/main/notebooks/voting_rights_appendix.ipynb) — did voting restrictions and the end of preclearance reopen the racial turnout gap?
+- [**Voting rights after *Shelby County***](voting_rights_appendix.ipynb) — did voting restrictions and the end of preclearance reopen the racial turnout gap? Read it here, or [run it on Colab](https://colab.research.google.com/github/AllenDowney/YouWouldChooseNow/blob/main/notebooks/voting_rights_appendix.ipynb)

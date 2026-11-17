@@ -28,7 +28,7 @@ The two events happened at about the same time, so this is hard to answer.
 This notebook presents three analyses:
 
 1. **The reopening.** How much the gap widened after 2012, in voter files and in two surveys, and how widely.
-2. **Restrictions in force.** For each state and federal election since 2000, we record whether a restriction on registration or voting was in force, and compare the change in the gap when a restriction took effect or ended with the change in states whose status didn't change. This is the most direct test of whether the restrictions states adopted widened the gap.
+2. **Restrictions in force.** For each state and federal election since 2000, we record whether a restriction on registration or voting was in force, and compare the change in turnout, and in the gap, when a restriction took effect or ended with the change in states whose status didn't change. This is the most direct test of whether the restrictions states adopted lowered turnout or widened the gap.
 3. **The end of preclearance.** *Shelby County* removed a requirement rather than imposing any particular rule, so its effect could include changes that a list of statewide restrictions misses. We replicate a published study that compares formerly covered counties with similar uncovered counties using voter files, examine how its result depends on choices made in the analysis, and extend the comparison through 2024 with survey data.
 
 
@@ -362,8 +362,8 @@ For each pair of consecutive elections, it compares:
 - states where a restriction took effect with states unrestricted in both elections;
 - states where restrictions ended with states restricted in both elections.
 
-Each comparison is the difference between the two groups' changes in the gap; the estimate averages them, weighted by the switching states' weight.
-A positive estimate means the gap was wider with a restriction in force than without.
+Each comparison is the difference between the two groups' changes in the outcome; the estimate averages them, weighted by the switching states' weight.
+We apply it first to turnout and then to the turnout gap.
 
 As a placebo, the same comparison is applied to the change from the election before: for states that switched between elections *t* − 1 and *t*, and comparison states, all with the same status in *t* − 2 and *t* − 1, the change from *t* − 2 to *t* − 1 should be near zero if switching and non-switching states were moving in parallel.
 Uncertainty comes from a bootstrap over states.
@@ -408,7 +408,85 @@ def did_switching(gap, weight, years, status, reps=500, seed=17):
                       "states": len(gap)})
 ```
 
-We apply it to three sources of state gaps (White minus Black, in points):
+### Effects on turnout
+
+Before turning to the gap, we ask whether restrictions reduced turnout at all.
+The primary measure is official: total ballots counted in each state's general election, divided by citizens of voting age, from Michael McDonald's [state turnout files](https://election.lab.ufl.edu/voter-turnout/) (University of Florida Election Lab, CC BY 4.0).
+The 2024 figures are his estimates as of March 2026, before every state's results were final.
+Before 2010, some states didn't report total ballots counted; those state-years are left out of the comparisons that involve them, rather than filled in with a different count.
+States are weighted by citizens of voting age in 2012.
+As checks, we use McDonald's voting-eligible population as the denominator (it also leaves out people disenfranchised by felony convictions), and turnout of all citizens in the CPS.
+
+```python
+official = pd.read_csv(data_path("state_turnout_official.csv"))
+official.head()
+```
+
+We also estimate the effect on Black and White turnout separately, from the voter files (weighted by each group's CVAP in 2012) and from the two surveys (weighted by each group's respondents, states with at least 20 respondents in the group in every year).
+
+```python
+def survey_turnout(rates, group, years, min_n=20):
+    s = rates[(rates.key == "state") & rates.year.isin(years) & (rates.group == group)]
+    pct = s.pivot(index="value", columns="year", values="pct")
+    n = s.pivot(index="value", columns="year", values="n").reindex(columns=years).fillna(0)
+    keep = (n >= min_n).all(axis=1)
+    return pct[keep], n[keep].sum(axis=1)
+
+
+FIPS_ABBR = {"01": "AL", "02": "AK", "04": "AZ", "05": "AR", "06": "CA", "08": "CO", "09": "CT", "10": "DE",
+             "11": "DC", "12": "FL", "13": "GA", "15": "HI", "16": "ID", "17": "IL", "18": "IN", "19": "IA",
+             "20": "KS", "21": "KY", "22": "LA", "23": "ME", "24": "MD", "25": "MA", "26": "MI", "27": "MN",
+             "28": "MS", "29": "MO", "30": "MT", "31": "NE", "32": "NV", "33": "NH", "34": "NJ", "35": "NM",
+             "36": "NY", "37": "NC", "38": "ND", "39": "OH", "40": "OK", "41": "OR", "42": "PA", "44": "RI",
+             "45": "SC", "46": "SD", "47": "TN", "48": "TX", "49": "UT", "50": "VT", "51": "VA", "53": "WA",
+             "54": "WV", "55": "WI", "56": "WY"}
+agg = (panel.assign(st=panel.state.map(FIPS_ABBR))
+            .groupby(["st", "year"])[["votes_White", "cvap_White", "votes_Black", "cvap_Black"]].sum())
+
+
+def official_turnout(column):
+    rate = official.pivot(index="state", columns="year", values=column)
+    return rate, official[official.year == 2012].set_index("state").cvap
+
+
+cps_census = cps[cps.rule == "census"]
+VF_YEARS = list(range(2008, 2024, 2))
+CES_YEARS = list(range(2008, 2026, 2))
+TURNOUT = {
+    ("all citizens", "official / CVAP"): (*official_turnout("turnout_cvap"), ELECTIONS),
+    ("all citizens", "official / VEP"): (*official_turnout("turnout_vep"), ELECTIONS),
+    ("all citizens", "CPS"): (*survey_turnout(cps_census, "All", ELECTIONS), ELECTIONS),
+}
+for group in ["Black", "White"]:
+    TURNOUT[(group, "voter files")] = ((100 * agg[f"votes_{group}"] / agg[f"cvap_{group}"]).unstack("year"),
+                                       agg[f"cvap_{group}"].xs(2012, level="year"), VF_YEARS)
+    TURNOUT[(group, "CPS")] = (*survey_turnout(cps_census, group, ELECTIONS), ELECTIONS)
+    TURNOUT[(group, "CES")] = (*survey_turnout(ces, group, CES_YEARS), CES_YEARS)
+
+turnout_effects = pd.DataFrame({(*k, rule): did_switching(rate, w, years, in_force(measures, rule))
+                                for rule in ["broad", "strict"] for k, (rate, w, years) in TURNOUT.items()}).T
+turnout_effects.index.names = ["turnout of", "source", "rule"]
+turnout_effects.astype({"switches on": int, "switches off": int, "states": int})
+```
+
+Estimates are in percentage points of turnout: how much higher turnout was with a restriction in force than without, compared with states whose status didn't change, so a negative estimate means restrictions lowered turnout.
+
+In the official counts, the effect on overall turnout is close to zero under both rules: +0.1 points (SE 1.0) under the broad rule and +0.2 under the strict rule, which rules out declines much larger than 2 points.
+The voting-eligible population gives the same result.
+In the CPS, the estimates are about −1 point (SE 0.7 to 1.0); the CPS is based on self-reports, and its state samples are smaller.
+
+Under the broad rule, the placebos are positive: +1.4 points in the official counts (SE 1.2) and +2.8 in the CPS (SE 1.1).
+That means that in the election before a restriction took effect, turnout in those states had risen more than in the comparison states, so the two groups weren't moving exactly in parallel.
+If that rise was temporary, it would push the estimates down, so it's unlikely that the estimates near zero hide a large decline; but it's a reason not to read much into differences of a point or two.
+Under the strict rule, the placebos are close to zero.
+
+For Black and White turnout separately, the estimates are within about 2 points of zero in the voter files and the CPS, with standard errors of 1 to 2 points for Black turnout; the CES is too small to say much.
+Under the broad rule, the estimate for Black turnout is somewhat more negative than for White turnout (−1.9 and −0.7 in the voter files), which is consistent with the small effect on the gap below; under the strict rule, both are close to zero.
+Because the two groups are weighted differently, the difference between them isn't exactly the estimate for the gap.
+
+### Effects on the gap
+
+We apply the same estimator to three sources of state gaps (White minus Black, in points):
 
 - the voter-file estimates, added up to states (all White ballots over all White CVAP, minus the same for Black), 2008–2022, weighted by Black CVAP;
 - the CPS, 2000–2024, states with at least 20 Black respondents in every year, weighted by Black respondents;
@@ -424,15 +502,6 @@ def survey_state_gaps(rates, years, min_black=20):
     return gap[keep], n[keep].sum(axis=1)
 
 
-FIPS_ABBR = {"01": "AL", "02": "AK", "04": "AZ", "05": "AR", "06": "CA", "08": "CO", "09": "CT", "10": "DE",
-             "11": "DC", "12": "FL", "13": "GA", "15": "HI", "16": "ID", "17": "IL", "18": "IN", "19": "IA",
-             "20": "KS", "21": "KY", "22": "LA", "23": "ME", "24": "MD", "25": "MA", "26": "MI", "27": "MN",
-             "28": "MS", "29": "MO", "30": "MT", "31": "NE", "32": "NV", "33": "NH", "34": "NJ", "35": "NM",
-             "36": "NY", "37": "NC", "38": "ND", "39": "OH", "40": "OK", "41": "OR", "42": "PA", "44": "RI",
-             "45": "SC", "46": "SD", "47": "TN", "48": "TX", "49": "UT", "50": "VT", "51": "VA", "53": "WA",
-             "54": "WV", "55": "WI", "56": "WY"}
-agg = (panel.assign(st=panel.state.map(FIPS_ABBR))
-            .groupby(["st", "year"])[["votes_White", "cvap_White", "votes_Black", "cvap_Black"]].sum())
 vf_gap = (100 * (agg.votes_White / agg.cvap_White - agg.votes_Black / agg.cvap_Black)).unstack("year")
 vf_w = agg.cvap_Black.xs(2012, level="year")
 
@@ -824,7 +893,7 @@ Four propositions, with different strengths of evidence:
    This appears in voter files and in both surveys, in every state with a large Black population, and in states that lost preclearance and states that didn't (Part 3).
    The evidence for this is strong.
 2. **The statewide restrictions we recorded don't explain much of the reopening** (Part 2).
-   When a restriction took effect or ended, the gap changed by less than a point relative to states whose status didn't change; the voter files rule out effects much larger than 2.5 points.
+   When a restriction took effect or ended, overall turnout in the official counts changed by less than a point relative to states whose status didn't change, and so did the gap; the official counts rule out declines in turnout much larger than 2 points, and the voter files rule out effects on the gap much larger than 2.5 points.
    This can't rule out effects of a point or so, effects that build up over several elections, or effects concentrated in some places.
 3. **The gap widened somewhat more in formerly covered places, relative to 2012** (Part 3), by an amount that depends on how the comparison is constructed:
    with counties weighted equally, 2–2.6 points of additional widening on average over 2014–2022 and 4–4.5 points by 2022; weighted by Black citizens, little additional widening until 2020 and about 2.5–4 points by 2022; in the surveys through 2024, 1–3 points more widening than in the rest of the South.

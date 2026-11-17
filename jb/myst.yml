@@ -7,6 +7,7 @@ project:
   github: https://github.com/AllenDowney/YouWouldChooseNow
   toc:
     - file: index.md
+    - file: voting_rights_appendix.ipynb
 
 site:
   template: book-theme
